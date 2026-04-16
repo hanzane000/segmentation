@@ -1,12 +1,12 @@
 import os
 import argparse
+from datetime import datetime
 
 import torch
 from torch.optim import Adam
 
 from data.data import build_dataloaders
 from losses.segmentation_loss import BCEDiceLoss
-from models.unet import UNet
 from utils.metrics import dice_score, iou_score
 
 
@@ -20,6 +20,8 @@ def parse_args():
     parser.add_argument("--save_dir", default="./checkpoints/baseline")
     parser.add_argument("--best_model_name", default="best_model.pth")
     parser.add_argument("--last_model_name", default="last_model.pth")
+    parser.add_argument("--logs_root", default="./logs")
+    parser.add_argument("--model_name", default="unet", choices=["unet", "unet_A"])
 
     # Training
     parser.add_argument("--epochs", type=int, default=30)
@@ -39,12 +41,44 @@ def parse_args():
     parser.add_argument("--in_channels", type=int, default=3)
     parser.add_argument("--num_classes", type=int, default=1)
     parser.add_argument("--bilinear", type=int, default=1)
+    parser.add_argument("--base_c", type=int, default=32)
 
     # Loss
     parser.add_argument("--bce_weight", type=float, default=1.0)
     parser.add_argument("--dice_weight", type=float, default=1.0)
 
     return parser.parse_args()
+
+
+def build_model(model_name, in_channels, num_classes, bilinear, base_c=32):
+    if model_name == "unet":
+        from models.unet import UNet
+    elif model_name == "unet_A":
+        from models.unet_A import UNet
+    else:
+        raise ValueError(f"Unsupported model_name: {model_name}")
+
+    model = UNet(
+        in_channels=in_channels,
+        num_classes=num_classes,
+        bilinear=bool(bilinear),
+        base_c=base_c,
+    )
+    return model
+
+
+def save_args_as_yaml(args, yaml_path, extra=None):
+    data = vars(args).copy()
+    if extra is not None:
+        data.update(extra)
+
+    with open(yaml_path, "w", encoding="utf-8") as f:
+        for key in sorted(data.keys()):
+            value = data[key]
+            if isinstance(value, str):
+                f.write(f'{key}: "{value}"\n')
+            else:
+                f.write(f"{key}: {value}\n")
 
 
 # =========================
@@ -95,6 +129,13 @@ def validate_one_epoch(model, loader, criterion, device):
 
 
 def main(args):
+    run_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_log_dir = os.path.join(args.logs_root, run_time)
+    os.makedirs(run_log_dir, exist_ok=True)
+
+    log_txt_path = os.path.join(run_log_dir, "train_log.txt")
+    yaml_path = os.path.join(run_log_dir, "config.yaml")
+
     img_dir = args.img_dir if args.img_dir else os.path.join(args.data_root, "images")
     mask_dir = args.mask_dir if args.mask_dir else os.path.join(args.data_root, "masks")
     best_ckpt_path = os.path.join(args.save_dir, args.best_model_name)
@@ -106,7 +147,28 @@ def main(args):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     else:
         device = torch.device(args.device)
-    print(f"Device: {device}")
+
+    save_args_as_yaml(
+        args=args,
+        yaml_path=yaml_path,
+        extra={
+            "run_time": run_time,
+            "img_dir_resolved": img_dir,
+            "mask_dir_resolved": mask_dir,
+            "best_ckpt_path": best_ckpt_path,
+            "last_ckpt_path": last_ckpt_path,
+            "device_resolved": str(device),
+        },
+    )
+
+    def log(message):
+        print(message)
+        with open(log_txt_path, "a", encoding="utf-8") as f:
+            f.write(message + "\n")
+
+    log(f"Run time: {run_time}")
+    log(f"Log dir: {run_log_dir}")
+    log(f"Device: {device}")
 
     train_loader, val_loader, train_stems, val_stems = build_dataloaders(
         img_dir=img_dir,
@@ -120,13 +182,15 @@ def main(args):
         val_resize_short=args.val_resize_short,
     )
 
-    print(f"Train samples: {len(train_stems)}")
-    print(f"Val samples: {len(val_stems)}")
+    log(f"Train samples: {len(train_stems)}")
+    log(f"Val samples: {len(val_stems)}")
 
-    model = UNet(
+    model = build_model(
+        model_name=args.model_name,
         in_channels=args.in_channels,
         num_classes=args.num_classes,
         bilinear=bool(args.bilinear),
+        base_c=args.base_c,
     ).to(device)
     criterion = BCEDiceLoss(bce_weight=args.bce_weight, dice_weight=args.dice_weight)
     optimizer = Adam(model.parameters(), lr=args.lr)
@@ -137,7 +201,7 @@ def main(args):
         train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device)
         val_loss, val_dice, val_iou = validate_one_epoch(model, val_loader, criterion, device)
 
-        print(
+        log(
             f"Epoch [{epoch}/{args.epochs}] "
             f"train loss: {train_loss:.4f} | "
             f"val loss: {val_loss:.4f} | "

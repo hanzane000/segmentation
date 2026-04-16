@@ -20,3 +20,5 @@ dataset/images/
 dataset/masks/
 dataset/labels/
 dataset/visualize/
+
+predictions/

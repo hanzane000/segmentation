@@ -1,12 +1,13 @@
 import os
 import argparse
+from datetime import datetime
 
 import cv2
 import numpy as np
 import torch
 
 from data.data import build_dataloaders
-from models.unet import UNet
+
 from utils.metrics import (
     dice_score,
     iou_score,
@@ -24,8 +25,9 @@ def parse_args():
     parser.add_argument("--img_dir", default="")
     parser.add_argument("--mask_dir", default="")
     parser.add_argument("--weights", default="checkpoints/baseline/best_model.pth")
-    parser.add_argument("--save_dir", default="predictions")
+    parser.add_argument("--save_dir", default="predictions/baseline")
     parser.add_argument("--visualize_dir", default="")
+    parser.add_argument("--model_name", default="unet", choices=["unet", "unet_A"])
 
     # Data loader
     parser.add_argument("--batch_size", type=int, default=4)
@@ -40,12 +42,30 @@ def parse_args():
     parser.add_argument("--in_channels", type=int, default=3)
     parser.add_argument("--num_classes", type=int, default=1)
     parser.add_argument("--bilinear", type=int, default=1)
+    parser.add_argument("--base_c", type=int, default=32)
 
     # Eval
     parser.add_argument("--device", default="auto")
     parser.add_argument("--threshold", type=float, default=0.5)
 
     return parser.parse_args()
+
+
+def build_model(model_name, in_channels, num_classes, bilinear, base_c=32):
+    if model_name == "unet":
+        from models.unet import UNet
+    elif model_name == "unet_A":
+        from models.unet_A import UNet
+    else:
+        raise ValueError(f"Unsupported model_name: {model_name}")
+
+    model = UNet(
+        in_channels=in_channels,
+        num_classes=num_classes,
+        bilinear=bool(bilinear),
+        base_c=base_c,
+    )
+    return model
 
 
 def get_device(device_arg):
@@ -157,6 +177,10 @@ def main():
     visualize_dir = args.visualize_dir if args.visualize_dir else os.path.join(args.data_root, "visualize")
 
     os.makedirs(args.save_dir, exist_ok=True)
+    parent_dir = os.path.dirname(args.save_dir)
+    if parent_dir == "":
+        parent_dir = "."
+    result_txt_path = os.path.join(parent_dir, f"{os.path.basename(args.save_dir)}.txt")
 
     device = get_device(args.device)
     print(f"Device: {device}")
@@ -175,10 +199,12 @@ def main():
 
     print(f"Val samples: {len(val_stems)}")
 
-    model = UNet(
+    model = build_model(
+        model_name=args.model_name,
         in_channels=args.in_channels,
         num_classes=args.num_classes,
-        bilinear=bool(args.bilinear),
+        bilinear=args.bilinear,
+        base_c=args.base_c,
     ).to(device)
 
     state_dict = torch.load(args.weights, map_location=device)
@@ -198,6 +224,19 @@ def main():
     print(f"precision: {metrics['precision']:.4f}")
     print(f"recall: {metrics['recall']:.4f}")
     print(f"pixel accuracy: {metrics['pixel_accuracy']:.4f}")
+
+    with open(result_txt_path, "a", encoding="utf-8") as f:
+        f.write("=" * 60 + "\n")
+        f.write(f"time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"weights: {args.weights}\n")
+        f.write(f"save_dir: {args.save_dir}\n")
+        f.write(f"threshold: {args.threshold}\n")
+        f.write(f"val_samples: {len(val_stems)}\n")
+        f.write(f"dice: {metrics['dice']:.6f}\n")
+        f.write(f"iou: {metrics['iou']:.6f}\n")
+        f.write(f"precision: {metrics['precision']:.6f}\n")
+        f.write(f"recall: {metrics['recall']:.6f}\n")
+        f.write(f"pixel_accuracy: {metrics['pixel_accuracy']:.6f}\n")
 
 
 if __name__ == "__main__":

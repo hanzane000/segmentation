@@ -68,24 +68,25 @@ class OutConv(nn.Module):
 
 
 class UNet(nn.Module):
-    def __init__(self, in_channels=3, num_classes=1, bilinear=True):
+    def __init__(self, in_channels=3, num_classes=1, bilinear=True, base_c=32):
         super().__init__()
         self.in_channels = in_channels
         self.num_classes = num_classes
         self.bilinear = bilinear
+        self.base_c = base_c
 
-        self.inc = DoubleConv(in_channels, 64)
-        self.down1 = Down(64, 128)
-        self.down2 = Down(128, 256)
-        self.down3 = Down(256, 512)
+        self.inc = DoubleConv(in_channels, base_c)
+        self.down1 = Down(base_c, base_c * 2)
+        self.down2 = Down(base_c * 2, base_c * 4)
+        self.down3 = Down(base_c * 4, base_c * 8)
         factor = 2 if bilinear else 1
-        self.down4 = Down(512, 1024 // factor)
+        self.down4 = Down(base_c * 8, base_c * 16 // factor)
 
-        self.up1 = Up(1024, 512 // factor, bilinear)
-        self.up2 = Up(512, 256 // factor, bilinear)
-        self.up3 = Up(256, 128 // factor, bilinear)
-        self.up4 = Up(128, 64, bilinear)
-        self.outc = OutConv(64, num_classes)
+        self.up1 = Up(base_c * 16, base_c * 8 // factor, bilinear)
+        self.up2 = Up(base_c * 8, base_c * 4 // factor, bilinear)
+        self.up3 = Up(base_c * 4, base_c * 2 // factor, bilinear)
+        self.up4 = Up(base_c * 2, base_c, bilinear)
+        self.outc = OutConv(base_c, num_classes)
 
     def forward(self, x):
         x1 = self.inc(x)
