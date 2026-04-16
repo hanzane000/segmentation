@@ -22,3 +22,8 @@ dataset/labels/
 dataset/visualize/
 
 predictions/
+
+*.pth
+*.pt
+*.ckpt
+checkpoints/
