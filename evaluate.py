@@ -23,8 +23,9 @@ def parse_args():
     parser.add_argument("--data_root", default="dataset")
     parser.add_argument("--img_dir", default="")
     parser.add_argument("--mask_dir", default="")
-    parser.add_argument("--weights", default="checkpoints/best_model.pth")
+    parser.add_argument("--weights", default="checkpoints/baseline/best_model.pth")
     parser.add_argument("--save_dir", default="predictions")
+    parser.add_argument("--visualize_dir", default="")
 
     # Data loader
     parser.add_argument("--batch_size", type=int, default=4)
@@ -53,20 +54,58 @@ def get_device(device_arg):
     return torch.device(device_arg)
 
 
-def save_predictions(logits, stems, save_dir, threshold=0.5):
+def load_visualize_image(stem, visualize_dir, h, w):
+    for ext in [".jpg", ".png", ".jpeg", ".bmp"]:
+        path = os.path.join(visualize_dir, stem + ext)
+        if os.path.exists(path):
+            image = cv2.imread(path, cv2.IMREAD_COLOR)
+            if image is not None:
+                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                image = cv2.resize(image, (w, h), interpolation=cv2.INTER_LINEAR)
+                return image
+    return np.zeros((h, w, 3), dtype=np.uint8)
+
+
+def colorize_mask(mask_uint8):
+    return np.stack([mask_uint8, mask_uint8, mask_uint8], axis=-1)
+
+
+def overlay_mask(image_rgb, mask_uint8, alpha=0.5, color=(255, 0, 0)):
+    overlay = image_rgb.copy()
+    binary = mask_uint8 > 0
+    overlay[binary] = color
+    blended = cv2.addWeighted(image_rgb, 1.0 - alpha, overlay, alpha, 0)
+    return blended
+
+
+def save_predictions(logits, gt_masks, stems, save_dir, visualize_dir, threshold=0.5):
     probs = torch.sigmoid(logits)
     preds = (probs > threshold).float()
 
     preds = preds.detach().cpu().numpy()
+    gt_masks = gt_masks.detach().cpu().numpy()
 
     for i, stem in enumerate(stems):
-        mask = preds[i, 0]
-        mask = (mask * 255).astype(np.uint8)
+        pred_mask = (preds[i, 0] * 255).astype(np.uint8)
+        gt_mask = (gt_masks[i, 0] * 255).astype(np.uint8)
+
+        h, w = gt_mask.shape
+        vis_image = load_visualize_image(stem, visualize_dir, h, w)
+        pred_vis = overlay_mask(vis_image, pred_mask, alpha=0.5, color=(255, 0, 0))
+
+        gt_mask_rgb = colorize_mask(gt_mask)
+        pred_mask_rgb = colorize_mask(pred_mask)
+
+        top_row = np.concatenate([gt_mask_rgb, vis_image], axis=1)
+        bottom_row = np.concatenate([pred_mask_rgb, pred_vis], axis=1)
+        grid = np.concatenate([top_row, bottom_row], axis=0)
+
+        grid_bgr = cv2.cvtColor(grid, cv2.COLOR_RGB2BGR)
         out_path = os.path.join(save_dir, f"{stem}.png")
-        cv2.imwrite(out_path, mask)
+        cv2.imwrite(out_path, grid_bgr)
 
 
-def evaluate(model, val_loader, device, save_dir, threshold=0.5):
+def evaluate(model, val_loader, device, save_dir, visualize_dir, threshold=0.5):
     model.eval()
 
     dice_sum = 0.0
@@ -91,7 +130,14 @@ def evaluate(model, val_loader, device, save_dir, threshold=0.5):
             pixel_acc_sum += pixel_accuracy(logits, masks, threshold=threshold) * batch_size
             total_samples += batch_size
 
-            save_predictions(logits, stems, save_dir, threshold=threshold)
+            save_predictions(
+                logits=logits,
+                gt_masks=masks,
+                stems=stems,
+                save_dir=save_dir,
+                visualize_dir=visualize_dir,
+                threshold=threshold,
+            )
 
     metrics = {
         "dice": dice_sum / total_samples,
@@ -108,6 +154,7 @@ def main():
 
     img_dir = args.img_dir if args.img_dir else os.path.join(args.data_root, "images")
     mask_dir = args.mask_dir if args.mask_dir else os.path.join(args.data_root, "masks")
+    visualize_dir = args.visualize_dir if args.visualize_dir else os.path.join(args.data_root, "visualize")
 
     os.makedirs(args.save_dir, exist_ok=True)
 
@@ -142,6 +189,7 @@ def main():
         val_loader=val_loader,
         device=device,
         save_dir=args.save_dir,
+        visualize_dir=visualize_dir,
         threshold=args.threshold,
     )
 
