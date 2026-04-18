@@ -1,5 +1,7 @@
+python train.py --model_name='unet_B' --save_dir='./checkpoints/B' --epochs=200
 python train.py --model_name='unet_A' --save_dir='./checkpoints/A' --epochs=200
 python train.py --model_name='unet' --save_dir='./checkpoints/baseline' --epochs=200
 
-python evaluate.py --weights='./checkpoints/A/best_model.pth' --save_dir='./predictions/A'
+python evaluate.py --model_name='unet_B' --weights='./checkpoints/B/best_model.pth' --save_dir='./predictions/B'
+python evaluate.py --model_name='unet_A' --weights='./checkpoints/A/best_model.pth' --save_dir='./predictions/A'
 python evaluate.py --model_name='unet' --weights='./checkpoints/baseline/best_model.pth' --save_dir='./predictions/baseline'

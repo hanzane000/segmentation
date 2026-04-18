@@ -21,7 +21,7 @@ def parse_args():
     parser.add_argument("--best_model_name", default="best_model.pth")
     parser.add_argument("--last_model_name", default="last_model.pth")
     parser.add_argument("--logs_root", default="./logs")
-    parser.add_argument("--model_name", default="unet", choices=["unet", "unet_A"])
+    parser.add_argument("--model_name", default="unet", choices=["unet", "unet_A", "unet_B"])
 
     # Training
     parser.add_argument("--epochs", type=int, default=30)
@@ -55,6 +55,8 @@ def build_model(model_name, in_channels, num_classes, bilinear, base_c=32):
         from models.unet import UNet
     elif model_name == "unet_A":
         from models.unet_A import UNet
+    elif model_name == "unet_B":
+        from models.unet_B import UNet
     else:
         raise ValueError(f"Unsupported model_name: {model_name}")
 
